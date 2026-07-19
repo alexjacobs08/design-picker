@@ -1,10 +1,10 @@
 /* View renderers. Each takes the #app root element + the store from app.js. */
 
-import { STYLES, STYLE_MAP } from "./data/styles.js";
+import { STYLES, STYLE_MAP, STYLE_CATS } from "./data/styles.js";
 import { DIMENSIONS } from "./data/options.js";
 import { GLOSSARY } from "./data/glossary.js";
 import { mountPreview } from "./preview.js";
-import { generateBrief, generateCSS, generateJSON } from "./exporter.js";
+import { generateBrief, generateCSS, generateJSON, generateTailwind } from "./exporter.js";
 import { resolveSelection, firstFont } from "./data/tokens.js";
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -24,28 +24,48 @@ export function renderGallery(root, store) {
     ${pageHead(
       "Step 1 — Explore",
       "What's your aesthetic?",
-      `Twenty-four design languages, rendered live. Click any style to learn its vocabulary — the <b>bold terms</b> are the words to use with your coding agent.`
+      `${STYLES.length} design languages, rendered live — filter by family, click any style to learn its vocabulary. The <b>bold terms</b> are the words to use with your coding agent.`
     )}
+    <div class="learn-controls">
+      <div class="cat-filters" id="cats">
+        <button data-cat="All" class="active">All · ${STYLES.length}</button>
+        ${STYLE_CATS.map((c) => `<button data-cat="${esc(c)}">${esc(c)} · ${STYLES.filter((s) => s.cat === c).length}</button>`).join("")}
+      </div>
+    </div>
     <div class="style-grid" id="grid"></div>
   </div>`;
 
   const grid = root.querySelector("#grid");
-  for (const s of STYLES) {
-    const card = document.createElement("a");
-    card.className = "style-card";
-    card.href = `#/style/${s.id}`;
-    card.innerHTML = `
-      <div class="pv-viewport"></div>
-      <div class="meta">
-        <h3>${esc(s.name)} <span class="aka">${esc(s.aka[0] || "")}</span></h3>
-        <p>${esc(s.tagline)}</p>
-        <div class="traits">${s.traits.slice(0, 4).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>
-      </div>`;
-    grid.appendChild(card);
-    const resolved = resolveSelection(DIMENSIONS, s.dims);
-    if (s.extras) resolved.extras.push(s.extras);
-    mountPreview(card.querySelector(".pv-viewport"), { ...resolved, key: s.id });
+
+  function draw(cat) {
+    grid.innerHTML = "";
+    for (const s of STYLES) {
+      if (cat !== "All" && s.cat !== cat) continue;
+      const card = document.createElement("a");
+      card.className = "style-card";
+      card.href = `#/style/${s.id}`;
+      card.innerHTML = `
+        <div class="pv-viewport"></div>
+        <div class="meta">
+          <h3>${esc(s.name)} ${s.hot ? `<span class="hot-badge">★ popular</span>` : ""} <span class="aka">${esc(s.aka[0] || "")}</span></h3>
+          <p>${esc(s.tagline)}</p>
+          <div class="traits"><span class="chip mono">${esc(s.cat)}</span>${s.traits.slice(0, 3).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>
+        </div>`;
+      grid.appendChild(card);
+      const resolved = resolveSelection(DIMENSIONS, s.dims);
+      if (s.extras) resolved.extras.push(s.extras);
+      mountPreview(card.querySelector(".pv-viewport"), { ...resolved, key: s.id });
+    }
   }
+
+  root.querySelector("#cats").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    root.querySelectorAll("#cats button").forEach((x) => x.classList.toggle("active", x === b));
+    draw(b.dataset.cat);
+  });
+
+  draw("All");
 }
 
 /* ----------------------------- style detail ----------------------------- */
@@ -143,6 +163,7 @@ export function renderBuilder(root, store) {
       </select>
       <button class="btn" id="randomize">🎲 Randomize</button>
       <button class="btn ghost" id="reset">Reset</button>
+      <button class="btn ghost" id="share" title="Copy a link to this exact configuration">🔗 Share</button>
       <span class="spacer"></span>
       <span class="preset-note" id="preset-note"></span>
     </div>
@@ -164,6 +185,7 @@ export function renderBuilder(root, store) {
   const previewBox = root.querySelector("#preview");
   const presetSel = root.querySelector("#preset");
   const note = root.querySelector("#preset-note");
+  const openDims = new Set(DIMENSIONS.slice(0, 3).map((d) => d.key));
 
   function syncBar() {
     const st = store.style();
@@ -176,10 +198,11 @@ export function renderBuilder(root, store) {
 
   function renderControls() {
     controls.innerHTML = "";
-    DIMENSIONS.forEach((d, i) => {
+    DIMENSIONS.forEach((d) => {
       const det = document.createElement("details");
       det.className = "dim";
-      if (i < 3) det.open = true;
+      det.open = openDims.has(d.key);
+      det.addEventListener("toggle", () => { det.open ? openDims.add(d.key) : openDims.delete(d.key); });
       const cur = d.options.find((o) => o.id === store.state.selection[d.key]);
       det.innerHTML = `<summary>
           <svg class="chev" width="10" height="10" viewBox="0 0 10 10"><path d="M3 1l4 4-4 4" stroke="currentColor" fill="none" stroke-width="1.5"/></svg>
@@ -197,8 +220,11 @@ export function renderBuilder(root, store) {
         b.innerHTML = `<span class="opt-name">${optVisual(d.key, o)} ${esc(o.label)}</span><span class="opt-desc">${esc(o.desc)}</span>`;
         b.addEventListener("click", () => {
           store.setSelection(d.key, o.id);
-          renderAll();
-          det.open = true;
+          // update in place — do NOT re-render the controls (keeps scroll + open sections)
+          opts.querySelectorAll(".opt").forEach((x) => x.classList.toggle("selected", x === b));
+          det.querySelector(".dim-current").textContent = o.label;
+          syncBar();
+          renderPreview();
         });
         opts.appendChild(b);
       }
@@ -219,6 +245,11 @@ export function renderBuilder(root, store) {
   });
   root.querySelector("#randomize").addEventListener("click", () => { store.randomize(); renderAll(); store.toast("Rolled a new random combination"); });
   root.querySelector("#reset").addEventListener("click", () => { store.reset(); renderAll(); });
+  root.querySelector("#share").addEventListener("click", async () => {
+    const url = `${location.origin}${location.pathname}#/builder?c=${store.serialize()}`;
+    await store.copy(url);
+    store.toast("Share link copied — it restores this exact config");
+  });
   root.querySelector("#copy-tldr").addEventListener("click", async () => {
     const brief = generateBrief(store.style(), store.resolved(), store.state.selection);
     const tldr = brief.split("## TL;DR — paste this if you only paste one thing")[1]?.split("##")[0].trim() || brief;
@@ -285,6 +316,7 @@ export function renderLearn(root, store) {
 const FORMATS = [
   { id: "brief", name: "Agent brief (Markdown)", desc: "Natural-language design direction. Paste into any coding agent's chat or your AGENTS.md / CLAUDE.md.", file: "design-brief.md", mime: "text/markdown" },
   { id: "css", name: "Stylesheet (CSS)", desc: "Design tokens as CSS custom properties + base styles for buttons, cards and inputs. Drop into your project.", file: "design-system.css", mime: "text/css" },
+  { id: "tailwind", name: "Tailwind config (JS)", desc: "A tailwind.config.js theme extension — colors, fonts, radii, shadows, motion. For Tailwind projects.", file: "tailwind.theme.js", mime: "text/javascript" },
   { id: "json", name: "Design tokens (JSON)", desc: "Structured tokens for tools, Tailwind config generation, or precise reference.", file: "design-tokens.json", mime: "application/json" },
 ];
 
@@ -297,6 +329,7 @@ export function renderExport(root, store, ui) {
   const content =
     fmt === "brief" ? generateBrief(style, resolved, sel)
     : fmt === "css" ? generateCSS(style, resolved)
+    : fmt === "tailwind" ? generateTailwind(style, resolved)
     : generateJSON(style, resolved);
   const activeFmt = FORMATS.find((f) => f.id === fmt);
 

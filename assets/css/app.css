@@ -115,6 +115,12 @@ main#app { min-height: calc(100vh - 140px); }
 }
 .chip.mono { font-family: var(--font-mono); font-size: 11px; }
 
+.hot-badge {
+  font: 600 10.5px var(--font-ui); letter-spacing: .04em;
+  color: var(--accent-ink); background: var(--accent);
+  padding: 2.5px 8px; border-radius: 999px; vertical-align: middle;
+}
+
 .toast {
   position: fixed; bottom: 26px; left: 50%; transform: translate(-50%, 20px);
   background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: 13.5px;

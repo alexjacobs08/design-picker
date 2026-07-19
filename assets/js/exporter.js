@@ -4,6 +4,79 @@ import { firstFont } from "./data/tokens.js";
 
 const title = (style) => (style ? style.name : "Custom Design");
 
+/* ---------- static color resolution (no var(--pv-*) leaks into exports) ---------- */
+
+function hexToRgb(hex) {
+  const h = hex.replace("#", "");
+  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
+}
+function rgbToHex([r, g, b]) {
+  const c = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+  return "#" + c(r) + c(g) + c(b);
+}
+function mixHex(c1, w1, c2) {
+  const a = hexToRgb(c1), b = hexToRgb(c2);
+  return rgbToHex([a[0] * w1 + b[0] * (1 - w1), a[1] * w1 + b[1] * (1 - w1), a[2] * w1 + b[2] * (1 - w1)]);
+}
+
+/* replace var(--pv-*) refs with literal values, then evaluate hex color-mix() */
+function resolveStatic(v, t) {
+  if (!v) return v;
+  let out = String(v);
+  const map = {
+    "--pv-accent2": t.accent2, "--pv-accent": t.accent, "--pv-on-accent": t.onAccent,
+    "--pv-text": t.text, "--pv-bg": t.bg, "--pv-muted": t.muted,
+    "--pv-surface2": t.surface2, "--pv-surface": t.surface, "--pv-border-c": t.borderC,
+  };
+  let prev;
+  do {
+    prev = out;
+    for (const [k, val] of Object.entries(map)) {
+      const needle = `var(${k})`;
+      if (out.includes(needle)) out = out.replaceAll(needle, resolveStatic(val, t));
+    }
+  } while (out !== prev && out.includes("var(--pv-"));
+  out = out.replace(/color-mix\(in srgb,\s*(#[0-9a-fA-F]{3,8})\s+([\d.]+)%\s*,\s*(#[0-9a-fA-F]{3,8})\s*\)/g,
+    (m, c1, p, c2) => mixHex(c1, parseFloat(p) / 100, c2));
+  return out;
+}
+
+/* tokens copy with all color-ish values made static */
+function staticTokens(t) {
+  const keys = ["bg","surface","surface2","text","muted","accent","accent2","onAccent","borderC","shadow","shadowHover"];
+  const out = { ...t };
+  for (const k of keys) out[k] = resolveStatic(out[k], t);
+  return out;
+}
+
+/* rewrite var(--pv-*) to the exported stylesheet's own var names */
+function pvToCssVars(str) {
+  return String(str)
+    .replaceAll("var(--pv-accent2)", "var(--accent-2)")
+    .replaceAll("var(--pv-accent)", "var(--accent)")
+    .replaceAll("var(--pv-on-accent)", "var(--on-accent)")
+    .replaceAll("var(--pv-text)", "var(--text)")
+    .replaceAll("var(--pv-bg)", "var(--bg)")
+    .replaceAll("var(--pv-muted)", "var(--text-muted)")
+    .replaceAll("var(--pv-surface2)", "var(--surface-2)")
+    .replaceAll("var(--pv-surface)", "var(--surface)")
+    .replaceAll("var(--pv-border-c)", "var(--border-color)")
+    .replaceAll("var(--pv-radius-sm)", "var(--radius-sm)")
+    .replaceAll("var(--pv-radius)", "var(--radius)")
+    .replaceAll("var(--pv-card-blur)", "var(--card-blur)")
+    .replaceAll("var(--pv-bw)", "var(--border-width)")
+    .replaceAll("var(--pv-bs)", "var(--border-style)")
+    .replaceAll("var(--pv-dur)", "var(--duration)")
+    .replaceAll("var(--pv-ease)", "var(--easing)")
+    .replaceAll("var(--pv-pad)", "var(--density)")
+    .replaceAll("var(--pv-shadow-hover)", "var(--shadow-hover)")
+    .replaceAll("var(--pv-shadow)", "var(--shadow)")
+    .replaceAll("var(--pv-font-display)", "var(--font-display)")
+    .replaceAll("var(--pv-font-body)", "var(--font-body)")
+    .replaceAll("var(--pv-link-c)", "var(--accent)");
+}
+
 function selectionMatchesStyle(style, selection) {
   if (!style) return false;
   return Object.entries(style.dims).every(([k, v]) => selection[k] === v);
@@ -12,7 +85,8 @@ function selectionMatchesStyle(style, selection) {
 /* ------------------------------ markdown brief ------------------------------ */
 
 export function generateBrief(style, resolved, selection) {
-  const { tokens, chosen } = resolved;
+  const { tokens: rawTokens, chosen } = resolved;
+  const tokens = staticTokens(rawTokens);
   const briefOf = (key) => chosen.find((c) => c.dim.key === key)?.opt.brief || "";
   const customized = style && !selectionMatchesStyle(style, selection);
   const L = [];
@@ -176,7 +250,7 @@ export function generateCSS(style, resolved) {
     .replace(/\.btn-sm/g, "")
     .trim();
 
-  return `/* ============================================================
+  return pvToCssVars(`/* ============================================================
    ${title(style)} — design tokens + base stylesheet
    Generated with DesignPicker (design-picker)
    ============================================================ */
@@ -324,13 +398,78 @@ ${hoverCss(t)}
 
 /* 6. Style-specific rules translated from the picker */
 ${extraCss || "/* none */"}
+`);
+}
+
+/* ------------------------------- Tailwind ------------------------------- */
+
+function fontList(stack) {
+  return stack.split(",").map((f) => `"${f.trim().replaceAll('"', "")}"`).join(", ");
+}
+
+export function generateTailwind(style, resolved) {
+  const t = staticTokens(resolved.tokens);
+  const r = (v) => (v === "999px" ? "9999px" : v);
+  return `/** ${title(style)} — Tailwind theme extension
+ *  Generated with DesignPicker. Merge into tailwind.config.js.
+ *  Fonts to load: ${firstFont(t.fontDisplay)}, ${firstFont(t.fontBody)} (Google Fonts).
+ */
+module.exports = {
+  theme: {
+    extend: {
+      colors: {
+        bg: "${t.bg}",
+        surface: "${t.surface}",
+        "surface-2": "${t.surface2}",
+        ink: "${t.text}",
+        muted: "${t.muted}",
+        accent: {
+          DEFAULT: "${t.accent}",
+          alt: "${t.accent2}",
+          ink: "${t.onAccent}",
+        },
+        line: "${t.borderC}",
+      },
+      fontFamily: {
+        display: [${fontList(t.fontDisplay)}],
+        body: [${fontList(t.fontBody)}],
+      },
+      fontSize: {
+        base: ["${t.bodySize}", { lineHeight: "${t.leading}" }],
+      },
+      letterSpacing: {
+        heading: "${t.hTracking}",
+      },
+      borderRadius: {
+        sm: "${r(t.radiusSm)}",
+        DEFAULT: "${r(t.radius)}",
+        lg: "${r(t.radius)}",
+      },
+      borderWidth: {
+        DEFAULT: "${t.bw}",
+      },
+      boxShadow: {
+        card: "${t.shadow.replaceAll('"', "'")}",
+        "card-hover": "${t.shadowHover.replaceAll('"', "'")}",
+      },
+      transitionDuration: {
+        DEFAULT: "${t.dur}",
+      },
+      transitionTimingFunction: {
+        DEFAULT: "${t.ease}",
+      },
+    },
+  },
+};
+/* Usage: bg-bg text-ink bg-surface text-muted bg-accent text-accent-ink
+ *        border-line rounded font-display tracking-heading shadow-card
+ * Note: "ink" accent styles mean the accent IS the text color (monochrome). */
 `;
 }
 
 /* --------------------------------- JSON --------------------------------- */
-
 export function generateTokensJSON(style, resolved) {
-  const { tokens: t } = resolved;
+  const t = staticTokens(resolved.tokens);
   return {
     name: title(style),
     color: {

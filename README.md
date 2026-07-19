@@ -8,10 +8,11 @@ Live site: **https://alexjacobs08.github.io/design-picker/**
 
 LLM coding agents default to generic designs unless you can describe what you want — and most of us don't know the design words. DesignPicker fixes that two ways:
 
-1. **Learn the vocabulary** — 24 archetypal styles (neubrutalism, glassmorphism, Swiss, luxury, terminal…) rendered live, each annotated with the terms agents understand, plus an 85-term searchable design glossary with paste-ready phrases.
-2. **Configure & export** — mix and match across 12 dimensions (color mood, accent, typography, corners, borders, shadows, surfaces, buttons, hover, motion, density, background decor), then export:
+1. **Learn the vocabulary** — 30 archetypal styles in 6 families (neubrutalism, glassmorphism, Swiss, luxury, terminal, Frutiger Aero…) rendered live, each annotated with the terms agents understand, plus an 85-term searchable design glossary with paste-ready phrases.
+2. **Configure & export** — mix and match across 12 dimensions (color mood, accent, typography, corners, borders, shadows, surfaces, buttons, hover, motion, density, background decor), share your exact config as a URL, then export:
    - **Markdown agent brief** (natural-language direction, paste into chat or `AGENTS.md`/`CLAUDE.md`)
    - **CSS stylesheet** (tokens + base component styles)
+   - **Tailwind config** theme extension
    - **Design tokens JSON**
 
 ## Stack

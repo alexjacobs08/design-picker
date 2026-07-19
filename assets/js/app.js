@@ -1,6 +1,6 @@
 /* App shell: hash router + central store. */
 
-import { DIMENSIONS, defaultSelection } from "./data/options.js";
+import { DIMENSIONS, DIMENSION_KEYS, defaultSelection } from "./data/options.js";
 import { STYLE_MAP } from "./data/styles.js";
 import { resolveSelection } from "./data/tokens.js";
 import { renderGallery, renderStyleDetail, renderBuilder, renderLearn, renderExport } from "./views.js";
@@ -53,6 +53,27 @@ const store = {
     this.state.selection[dimKey] = optId;
     // styleId is kept as the "based on" reference even after customization
     this.save();
+  },
+
+  /* compact config string: 12 option ids in canonical dimension order */
+  serialize() {
+    return DIMENSION_KEYS.map((k) => this.state.selection[k]).join(",");
+  },
+
+  applySerialized(str) {
+    const parts = String(str).split(",");
+    if (parts.length !== DIMENSION_KEYS.length) return false;
+    const sel = {};
+    for (let i = 0; i < parts.length; i++) {
+      const dim = DIMENSIONS[i];
+      if (!dim.options.some((o) => o.id === parts[i])) return false;
+      sel[dim.key] = parts[i];
+    }
+    this.state.selection = sel;
+    const match = Object.values(STYLE_MAP).find((s) => Object.entries(s.dims).every(([k, v]) => sel[k] === v));
+    this.state.styleId = match ? match.id : null;
+    this.save();
+    return true;
   },
 
   loadStyle(id) {
@@ -118,7 +139,10 @@ const tabs = document.getElementById("tabs");
 
 function route() {
   const hash = location.hash || "#/styles";
-  const [, page, param] = hash.split("/"); // "#/style/x" -> ["", "style", "x"]
+  const [pathPart, queryPart] = hash.slice(1).split("?");
+  const segs = pathPart.split("/").filter(Boolean);
+  const page = segs[0] || "styles";
+  const param = segs[1];
   const tabFor = { styles: "styles", style: "styles", builder: "builder", learn: "learn", export: "export" }[page] || "styles";
 
   tabs.querySelectorAll("a").forEach((a) => a.classList.toggle("active", a.dataset.tab === tabFor));
@@ -126,7 +150,12 @@ function route() {
   window.scrollTo({ top: 0 });
   switch (page) {
     case "style": renderStyleDetail(app, store, param); break;
-    case "builder": renderBuilder(app, store); break;
+    case "builder": {
+      const c = new URLSearchParams(queryPart || "").get("c");
+      if (c) store.applySerialized(c);
+      renderBuilder(app, store);
+      break;
+    }
     case "learn": renderLearn(app, store); break;
     case "export": renderExport(app, store, ui); break;
     default: renderGallery(app, store);
